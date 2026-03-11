@@ -117,7 +117,6 @@ class RegisterWindow(QWidget):
         self.back_btn = QPushButton('Back to Login')
         self.back_btn.setObjectName('secondaryButton')
         self.back_btn.clicked.connect(self.go_back)
-        # Исправление размеров кнопки Back to Login
         self.back_btn.setMinimumWidth(280)
         self.back_btn.setMinimumHeight(52)
         self.back_btn.setStyleSheet('font-size: 16px; padding: 14px 24px;')
@@ -243,7 +242,6 @@ class LoginWindow(QWidget):
         self.reg_btn = QPushButton('Create Account')
         self.reg_btn.setObjectName('secondaryButton')
         self.reg_btn.clicked.connect(self.open_register)
-        # Исправление размеров кнопки Create Account
         self.reg_btn.setMinimumWidth(280)
         self.reg_btn.setMinimumHeight(52)
         self.reg_btn.setStyleSheet('font-size: 16px; padding: 14px 24px;')
@@ -671,7 +669,6 @@ class MainWindow(QMainWindow):
         self.select_manual_btn = QPushButton('Choose from Schedule')
         self.select_manual_btn.setObjectName('secondaryButton')
         self.select_manual_btn.clicked.connect(self.show_activity_selection_dialog)
-        # Исправление размеров кнопки Choose from Schedule
         self.select_manual_btn.setMinimumWidth(240)
         self.select_manual_btn.setMinimumHeight(52)
         self.select_manual_btn.setStyleSheet('font-size: 16px; padding: 14px 24px;')
