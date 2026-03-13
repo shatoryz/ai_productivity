@@ -35,7 +35,9 @@ class Database:
                 t_max_eyes REAL, f_opt_blink REAL,
                 sigma_time REAL, cooldown_tau REAL,
                 alpha_S REAL, alpha_E REAL, alpha_P REAL,
-                history_size INTEGER)''')
+                history_size INTEGER,
+                alpha REAL DEFAULT 0.1,
+                gamma REAL DEFAULT 0.15)''')
             cur.execute('''CREATE TABLE IF NOT EXISTS factor_history(
                 id INTEGER PRIMARY KEY, user_id INTEGER,
                 S_value REAL, E_value REAL, P_value REAL, C_value REAL,
@@ -43,6 +45,10 @@ class Database:
             cur.execute('''CREATE TABLE IF NOT EXISTS session_productivity(
                 id INTEGER PRIMARY KEY, user_id INTEGER, session_id TEXT,
                 productivity REAL, timestamp REAL)''')
+            cur.execute('''CREATE TABLE IF NOT EXISTS trend_history(
+                id INTEGER PRIMARY KEY, user_id INTEGER,
+                productivity REAL, trend REAL, score_trend REAL,
+                timestamp REAL, session_id TEXT)''')
             conn.commit()
             conn.close()
 
