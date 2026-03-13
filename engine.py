@@ -43,7 +43,9 @@ class Engine:
                 'f_opt_blink': float(result[10]) if result[10] else 17.0,
                 'sigma_time': float(result[11]) if result[11] else 2.0,
                 'cooldown_tau': float(result[12]) if result[12] else 45.0,
-                'history_size': int(result[16]) if len(result) > 16 and result[16] else 10
+                'history_size': int(result[16]) if len(result) > 16 and result[16] else 10,
+                'alpha': float(result[17]) if len(result) > 17 and result[17] else 0.1,
+                'gamma': float(result[18]) if len(result) > 18 and result[18] else 0.15
             }
             conn.close()
             return coeffs
@@ -58,17 +60,24 @@ class Engine:
             'w_S': 0.4, 'w_E': 0.3, 'w_P': 0.2, 'w_C': 0.1,
             't_max_eyes': 2.5, 'f_opt_blink': 17.0,
             'sigma_time': 2.0, 'cooldown_tau': 45.0,
-            'history_size': 10
+            'history_size': 10,
+            'alpha': 0.1,
+            'gamma': 0.15
         }
 
     def update_coefficients(self, new_coeffs):
         conn = self.db_mgr.get_connection()
         cur = conn.cursor()
         cur.execute('''UPDATE user_coefficients SET
-            w_S=?, w_E=?, w_P=?, w_C=?
+            w_S=?, w_E=?, w_P=?, w_C=?, alpha=?, gamma=?
             WHERE user_id=?''',
-                    (new_coeffs['w_S'], new_coeffs['w_E'],
-                     new_coeffs['w_P'], new_coeffs['w_C'], self.user_id))
+                    (new_coeffs.get('w_S', self.coefficients['w_S']),
+                     new_coeffs.get('w_E', self.coefficients['w_E']),
+                     new_coeffs.get('w_P', self.coefficients['w_P']),
+                     new_coeffs.get('w_C', self.coefficients['w_C']),
+                     new_coeffs.get('alpha', self.coefficients.get('alpha', 0.1)),
+                     new_coeffs.get('gamma', self.coefficients.get('gamma', 0.15)),
+                     self.user_id))
         conn.commit()
         conn.close()
         self.coefficients.update(new_coeffs)
@@ -114,9 +123,54 @@ class Engine:
                       self.coefficients['w_P'] * P + self.coefficients['w_C'] * C_factor)
         return base_score * priority_time
 
-
     def calculate_productivity_score(self, S, E, P, C):
         return (0.4 * S + 0.3 * E + 0.2 * P + 0.1 * C) * 100
+
+    def calculate_trend(self, productivity_scores):
+        if len(productivity_scores) < 6:
+            return 0.0
+        recent_3 = productivity_scores[-3:]
+        old_3 = productivity_scores[:3]
+        avg_recent = sum(recent_3) / len(recent_3)
+        avg_old = sum(old_3) / len(old_3)
+        trend = avg_recent - avg_old
+        return self._clip(trend, -1.0, 1.0)
+
+    def calculate_score_with_trend(self, productivity, trend):
+        gamma = self.coefficients.get('gamma', 0.15)
+        score_trend = productivity * (1 + gamma * trend)
+        return self._clip(score_trend, 0.0, 100.0)
+
+    def update_task_score_with_feedback(self, current_score, feedback):
+        alpha = self.coefficients.get('alpha', 0.1)
+        new_score = current_score + alpha * feedback
+        return self._clip(new_score, 0.0, 100.0)
+
+    def get_productivity_with_trend(self):
+        factor_history = self.get_factor_history_for_charts()
+        if not factor_history:
+            return {'productivity': 0, 'trend': 0, 'score_trend': 0}
+        productivity_scores = []
+        for h in factor_history:
+            S = h[0] if h[0] else 0
+            E = h[1] if h[1] else 0
+            P = h[2] if h[2] else 0
+            C = h[3] if h[3] else 0
+            score = self.calculate_productivity_score(S, E, P, C)
+            productivity_scores.append(score)
+        if not productivity_scores:
+            return {'productivity': 0, 'trend': 0, 'score_trend': 0}
+        current_productivity = productivity_scores[-1] if productivity_scores else 0
+        trend = self.calculate_trend(productivity_scores)
+        score_trend = self.calculate_score_with_trend(current_productivity, trend)
+        return {
+            'productivity': current_productivity,
+            'trend': trend,
+            'score_trend': score_trend,
+            'avg': sum(productivity_scores) / len(productivity_scores),
+            'best': max(productivity_scores),
+            'sessions': len(productivity_scores)
+        }
 
     def save_factor_history(self, S, E, P, C):
         conn = self.db_mgr.get_connection()
@@ -125,6 +179,17 @@ class Engine:
             (user_id, S_value, E_value, P_value, C_value, timestamp, session_id)
             VALUES (?, ?, ?, ?, ?, ?, ?)''',
                     (self.user_id, S, E, P, C, time.time(), self.session_id))
+        conn.commit()
+        conn.close()
+        return True
+
+    def save_trend_data(self, productivity, trend, score_trend):
+        conn = self.db_mgr.get_connection()
+        cur = conn.cursor()
+        cur.execute('''INSERT INTO trend_history
+            (user_id, productivity, trend, score_trend, timestamp, session_id)
+            VALUES (?, ?, ?, ?, ?, ?)''',
+                    (self.user_id, productivity, trend, score_trend, time.time(), self.session_id))
         conn.commit()
         conn.close()
         return True
@@ -152,6 +217,19 @@ class Engine:
         conn.close()
         return result if result else []
 
+    def get_trend_history(self, limit=50):
+        conn = self.db_mgr.get_connection()
+        cur = conn.cursor()
+        cur.execute('''SELECT productivity, trend, score_trend, timestamp
+            FROM trend_history
+            WHERE user_id=?
+            ORDER BY timestamp ASC
+            LIMIT ?''',
+                    (self.user_id, limit))
+        result = cur.fetchall()
+        conn.close()
+        return result if result else []
+
     def get_recommendation(self, user_state, available_activities, planned_time=30):
         if not available_activities:
             return None
@@ -166,13 +244,14 @@ class Engine:
                                     act.get('end_time', '23:59')):
                     scheduled_activity = act
                     break
-
         S = self.calculate_S(
             user_state.get('t_closed', 0.0),
             user_state.get('f_blink', 0.0),
             user_state.get('pose_angle', 0.0)
         )
         emotion_probs = user_state.get('emotion_probs', {'neutral': 1.0})
+        productivity_data = self.get_productivity_with_trend()
+        current_trend = productivity_data.get('trend', 0)
         scored = []
         for act in available_activities:
             category = act.get('category', 'mental')
@@ -181,11 +260,14 @@ class Engine:
             C = self.calculate_C_factor(act.get('difficulty', 0.5), S)
             priority = act.get('priority', 0.5) * 2
             score = self.calculate_score(S, E, P, C, priority)
+            score_with_trend = self.calculate_score_with_trend(score * 100, current_trend)
             if scheduled_activity and act['activity'] == scheduled_activity['activity']:
-                score *= 10
+                score_with_trend *= 10
             scored.append({
                 'activity': act,
-                'score': score,
+                'score': score_with_trend,
+                'base_score': score,
+                'trend': current_trend,
                 'is_scheduled': (scheduled_activity and act['activity'] == scheduled_activity['activity']),
                 'factors': {'S': S, 'E': E, 'P': P, 'C': C}
             })
@@ -198,14 +280,20 @@ class Engine:
             reasons.append('Full energy')
         if best['factors']['E'] > 0.7:
             reasons.append('Great mood')
+        if current_trend > 0.1:
+            reasons.append('Improving trend')
+        elif current_trend < -0.1:
+            reasons.append('Declining trend')
         if not reasons:
             reasons.append('Balanced choice')
-
         self.save_factor_history(S, E, P, C)
-
+        productivity = self.calculate_productivity_score(S, E, P, C)
+        score_trend = self.calculate_score_with_trend(productivity, current_trend)
+        self.save_trend_data(productivity, current_trend, score_trend)
         return {
             'activity': best['activity'],
             'score': best['score'],
+            'trend': current_trend,
             'reason': ' | '.join(reasons[:3]),
             'all_scores': scored[:3],
             'planned_time': planned_time,
@@ -283,7 +371,7 @@ class Engine:
     def get_productivity_stats(self):
         factor_history = self.get_factor_history_for_charts()
         if not factor_history:
-            return {'avg': 0, 'trend': 0, 'best': 0, 'sessions': 0}
+            return {'avg': 0, 'trend': 0, 'best': 0, 'sessions': 0, 'score_trend': 0}
         productivity_scores = []
         for h in factor_history:
             S = h[0] if h[0] else 0
@@ -293,17 +381,17 @@ class Engine:
             score = self.calculate_productivity_score(S, E, P, C)
             productivity_scores.append(score)
         if not productivity_scores:
-            return {'avg': 0, 'trend': 0, 'best': 0, 'sessions': 0}
+            return {'avg': 0, 'trend': 0, 'best': 0, 'sessions': 0, 'score_trend': 0}
         avg = sum(productivity_scores) / len(productivity_scores)
         best = max(productivity_scores)
-        trend = 0
-        if len(productivity_scores) >= 4:
-            recent_avg = sum(productivity_scores[-3:]) / 3
-            old_avg = sum(productivity_scores[:3]) / 3
-            trend = recent_avg - old_avg
+        current_productivity = productivity_scores[-1]
+        trend = self.calculate_trend(productivity_scores)
+        score_trend = self.calculate_score_with_trend(current_productivity, trend)
         return {
             'avg': avg,
             'trend': trend,
             'best': best,
-            'sessions': len(productivity_scores)
+            'sessions': len(productivity_scores),
+            'productivity': current_productivity,
+            'score_trend': score_trend
         }
