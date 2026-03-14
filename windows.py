@@ -200,7 +200,7 @@ class LoginWindow(QWidget):
         auth_card.setObjectName('authCard')
         card_layout = QVBoxLayout(auth_card)
         card_layout.setSpacing(20)
-        title = QLabel('PugRitm')
+        title = QLabel('SPECRITM')
         title.setObjectName('authTitle')
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         card_layout.addWidget(title)
