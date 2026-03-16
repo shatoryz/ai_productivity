@@ -300,10 +300,9 @@ class ActivitySelectDialog(QDialog):
             self.activity_table.setItem(r, 2, QTableWidgetItem(act.get('start_time', '00:00')))
             self.activity_table.setItem(r, 3, QTableWidgetItem(act.get('end_time', '00:00')))
 
-            # Кнопка с галочкой вместо текста
             select_btn = QPushButton('✓')
             select_btn.setObjectName('selectButton')
-            select_btn.setFixedSize(60, 40)  # Фиксированный размер для галочки
+            select_btn.setFixedSize(60, 40)
             select_btn.setCursor(Qt.CursorShape.PointingHandCursor)
             select_btn.setToolTip('Select this activity')
             select_btn.setStyleSheet('''
@@ -322,7 +321,6 @@ class ActivitySelectDialog(QDialog):
             ''')
             select_btn.clicked.connect(lambda checked, a=act: self.select_activity(a))
 
-            # Создаем виджет-контейнер для центрирования кнопки в ячейке
             cell_widget = QWidget()
             cell_layout = QHBoxLayout(cell_widget)
             cell_layout.setContentsMargins(0, 0, 0, 0)
